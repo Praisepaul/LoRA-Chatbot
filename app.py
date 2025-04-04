@@ -103,5 +103,4 @@ def ask_bot():
         answer = result.split("### Answer:")[-1].strip()
         print("Bot:", answer)
 
-# Start the chatbot
 ask_bot()
