@@ -1,0 +1,16 @@
+transformers 
+datasets 
+peft 
+accelerate 
+bitsandbytes 
+pdfminer.six
+sacremoses
+torch
+ipywidgets
+flask
+gradio
+pandas
+scikit-learn
+uvicorn
+gunicorn
+python-dotenv
