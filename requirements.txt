@@ -2,7 +2,7 @@ transformers
 datasets 
 peft 
 accelerate 
-#bitsandbytes 
+azure-storage-blob
 pdfminer.six
 sacremoses
 torch
