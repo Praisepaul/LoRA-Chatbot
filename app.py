@@ -8,7 +8,7 @@ from azure.storage.blob import BlobServiceClient
 import os
 
 # Azure Blob Storage Configuration
-CONNECT_STR = "YOUR_STORAGE_ACCOUNT_CONNECTION_STRING"  # Replace with your connection string
+CONNECT_STR = "DefaultEndpointsProtocol=https;AccountName=medibotstorageaccount;AccountKey=w/U54yjM/OZjvmwetX4lRU/MdNIprT9DroqUeWCqS6w9IGzKbBpq+L+pCXiWWfpajPm5IVf8UPP1+ASt4/qNsg==;EndpointSuffix=core.windows.net"  # Replace with your connection string
 CONTAINER_NAME = "medibot-data"
 BLOB_SERVICE_CLIENT = BlobServiceClient.from_connection_string(CONNECT_STR)
 CONTAINER_CLIENT = BLOB_SERVICE_CLIENT.get_container_client(CONTAINER_NAME)
