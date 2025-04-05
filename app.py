@@ -1,20 +1,55 @@
-
 from pdfminer.high_level import extract_text
 import pandas as pd
 from datasets import Dataset
 from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer, pipeline
 from peft import get_peft_model, LoraConfig, TaskType
 import torch
+from azure.storage.blob import BlobServiceClient
+import os
 
-# Download the medical book from your GitHub repo
+# Azure Blob Storage Configuration
+CONNECT_STR = "YOUR_STORAGE_ACCOUNT_CONNECTION_STRING"  # Replace with your connection string
+CONTAINER_NAME = "medibot-data"
+BLOB_SERVICE_CLIENT = BlobServiceClient.from_connection_string(CONNECT_STR)
+CONTAINER_CLIENT = BLOB_SERVICE_CLIENT.get_container_client(CONTAINER_NAME)
+MODEL_OUTPUT_DIR = "./lora-medical-chatbot"
+BLOB_MODEL_PATH = "trained_model"
+
+def upload_file_to_blob(local_file_path, blob_name):
+    try:
+        with open(local_file_path, "rb") as data:
+            CONTAINER_CLIENT.upload_blob(name=blob_name, data=data, overwrite=True)
+        print(f"Uploaded {local_file_path} to {CONTAINER_NAME}/{blob_name}")
+    except Exception as e:
+        print(f"Error uploading {local_file_path}: {e}")
+
+def download_file_from_blob(blob_name, local_file_path):
+    try:
+        blob_client = CONTAINER_CLIENT.get_blob_client(blob=blob_name)
+        with open(local_file_path, "wb") as download_file:
+            download_file.write(blob_client.download_blob().readall())
+        print(f"Downloaded {CONTAINER_NAME}/{blob_name} to {local_file_path}")
+    except Exception as e:
+        print(f"Error downloading {CONTAINER_NAME}/{blob_name}: {e}")
+        return None
+    return local_file_path
+
+# Download the medical book from Blob Storage
+local_medical_book_path = "medical_book.pdf"
+download_file_from_blob("data/medical_book.pdf", local_medical_book_path)
+
 # Extract text from the PDF
-text = extract_text("medical_book.pdf")
+try:
+    text = extract_text(local_medical_book_path)
+except FileNotFoundError:
+    print(f"Error: Medical book not found at {local_medical_book_path}. Make sure it's uploaded to Blob Storage.")
+    exit()
 
 # Split text into question-answer-like chunks
-def split_into_qa_pairs(text, max_chunk_length=256): # Reduced chunk length
+def split_into_qa_pairs(text, max_chunk_length=256):
     import re
     chunks = []
-    sentences = re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?)\s', text) # Split on sentence boundaries
+    sentences = re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?)\s', text)
     current_chunk = ""
     for sentence in sentences:
         if len(current_chunk) + len(sentence) < max_chunk_length:
@@ -25,7 +60,7 @@ def split_into_qa_pairs(text, max_chunk_length=256): # Reduced chunk length
     if current_chunk:
         chunks.append(current_chunk.strip())
     return [{"prompt": f"Summarize this:\n{chunk}", "response": chunk}
-            for chunk in chunks if len(chunk) > 50]  # Increased min chunk length for better context
+            for chunk in chunks if len(chunk) > 50]
 
 qa_data = split_into_qa_pairs(text)
 
@@ -60,7 +95,8 @@ training_args = TrainingArguments(
     per_device_train_batch_size=1,
     num_train_epochs=3,
     logging_steps=5,
-    save_strategy="no",
+    save_strategy="steps", # Changed to steps for easier saving
+    save_steps=500,
     learning_rate=2e-4,
     report_to="none"
 )
@@ -73,7 +109,7 @@ def compute_loss(model, inputs, return_outputs=False):
     return outputs.loss
 
 class CustomTrainer(Trainer):
-    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):  # Add num_items_in_batch
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         return compute_loss(model, inputs, return_outputs)
 
 trainer = CustomTrainer(
@@ -85,10 +121,26 @@ trainer = CustomTrainer(
 
 trainer.train()
 
-model.save_pretrained("./lora-medical-chatbot")
-tokenizer.save_pretrained("./lora-medical-chatbot")
+# Save the trained model to Blob Storage
+local_model_path = "./lora-medical-chatbot"
+model.save_pretrained(local_model_path)
+tokenizer.save_pretrained(local_model_path)
 
-chatbot = pipeline("text-generation", model="./lora-medical-chatbot", tokenizer="./lora-medical-chatbot", device=-1)
+for filename in os.listdir(local_model_path):
+    local_file = os.path.join(local_model_path, filename)
+    blob_name = os.path.join(BLOB_MODEL_PATH, filename)
+    upload_file_to_blob(local_file, blob_name)
+
+# Load the model from Blob Storage for chatbot (conceptual - you might need to download first)
+local_model_for_chat_path = "lora-medical-chatbot-loaded"
+os.makedirs(local_model_for_chat_path, exist_ok=True)
+download_file_from_blob(os.path.join(BLOB_MODEL_PATH, "adapter_config.json"), os.path.join(local_model_for_chat_path, "adapter_config.json"))
+download_file_from_blob(os.path.join(BLOB_MODEL_PATH, "adapter_model.bin"), os.path.join(local_model_for_chat_path, "adapter_model.bin"))
+download_file_from_blob(os.path.join(BLOB_MODEL_PATH, "tokenizer_config.json"), os.path.join(local_model_for_chat_path, "tokenizer_config.json"))
+download_file_from_blob(os.path.join(BLOB_MODEL_PATH, "special_tokens_map.json"), os.path.join(local_model_for_chat_path, "special_tokens_map.json"))
+download_file_from_blob(os.path.join(BLOB_MODEL_PATH, "tokenizer.json"), os.path.join(local_model_for_chat_path, "tokenizer.json"))
+
+chatbot = pipeline("text-generation", model=local_model_for_chat_path, tokenizer=local_model_for_chat_path, device=-1)
 
 # Create a loop for user interaction
 def ask_bot():
